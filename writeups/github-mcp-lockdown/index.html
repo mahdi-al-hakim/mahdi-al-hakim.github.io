@@ -22,7 +22,7 @@ switch. Seven of those nine return text written by repository users, and lockdow
 case at a time. Six had a check. <code>get_commits</code> did not, so under lockdown
 a fork pull request from an untrusted account still returned its commit messages in full.</p>
 <p>That is the whole bug. The rest of this is the trust model it sits in, how the gap was found, how it was
-proven at runtime instead of read off the source, and five things I got wrong in the report.</p>
+proven at runtime instead of read off the source, and where my own report was wide of the mark.</p>
 <p><strong>Status.</strong> Reported privately on 2026-08-09. Fix merged as
 <a href="https://github.com/github/github-mcp-server/pull/3109">PR #3109</a> at 12:41 UTC on 2026-08-19 (merge commit
 <code>769340d6</code>) and published in

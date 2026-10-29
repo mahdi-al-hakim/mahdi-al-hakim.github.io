@@ -12,43 +12,44 @@
 <div class="wrap">
 <div class="masthead"><h1>Mahdi Alhakim</h1></div>
 
-<p>Nearly everything I find is the same bug in a different system. A check reports success when it never
+<p>A lot of what I find is the same bug in a different system. A check reports success when it never
 actually looked.</p>
 <p>A prompt-injection filter covered six of the seven methods that needed it. A fuzz harness opened the file
 and closed it again without ever reading an attribute. An admin screen reported no access while the write
 went through. A safety probe passed green while the agent sent data out on every turn. Four different
 codebases, one failure: the thing meant to catch the problem could not have seen it.</p>
-<p>I look for that gap, report it to the vendor privately, and then write up what the test missed and how I
-proved it was missing. Software engineer in Beirut, working on MCP servers and agent tooling. US citizen,
-no sponsorship needed.</p>
+<p>I look for such gaps, report them to the vendor privately, and then write up what the test missed and how I
+proved it was missing. Software engineer in Beirut. I build MCP servers and agent tooling, and the security work is what I do with
+the rest of my time. US citizen, no sponsorship needed. Open to relocating.</p>
 <p><a href="https://github.com/mahdi-al-hakim">GitHub</a> |
 <a href="https://www.linkedin.com/in/mahdi-alhakim-ab75731b9">LinkedIn</a> |
 <a href="resume.pdf">Resume</a> |
 mahdi.a.alhakim@gmail.com</p>
 <hr>
 <h2>Writeups</h2>
-<p>Each of these went to the vendor privately first. Each one includes what I got wrong, because in every
-case the mistakes were the part worth reading.</p>
+<p>Each of these went to the vendor privately first. Each one covers how the gap was found and how it was
+proven, not just what it was.</p>
 <h3><a href="writeups/github-mcp-lockdown/">One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</a></h3>
 <p><code>pull_request_read</code> dispatches nine methods from one switch. Seven of them return text written by
-repository users, and lockdown mode covered six. The two-account rig and the positive control that proved
-it at runtime, why the vendor's framing of lockdown was right and mine was wrong, and five other things I
-got wrong in the report.</p>
+repository users, and lockdown mode covered six. The writeup covers the two-account rig and the positive
+control that proved it at runtime rather than from reading the source, and how the trust model the vendor
+actually ships, a best-effort content filter and not an authorization boundary, decides what counts as a
+gap at all.</p>
 <p>Reported Aug 2026, fixed in v1.10.0 the same month. One of three credited reporters.</p>
 <h3><a href="writeups/netcdf-c/">A one-byte differential in netcdf-c: integer overflow in classic-format length arithmetic</a></h3>
 <p>netcdf-c runs on OSS-Fuzz, and the only harness it had opened a file and closed it without ever reading an
 attribute value. One byte of an 80-byte header undersizes a heap allocation while the un-wrapped element
-count still drives the read loop. Includes the half of my hypothesis that was wrong, a claim I had to
-retract in public, and the maintainer's observation that my own fix ships no regression test.</p>
+count still drives the read loop. The writeup covers how the differential was isolated to one byte and why
+the project's only fuzz harness could never reach it.</p>
 <p>Reported Jul 2026. Fix PR open at the maintainer's request. How to build a triggering file is not
 published here.</p>
 <h3><a href="writeups/keycloak-caep/">Three reports to one vendor inside two weeks</a></h3>
-<p>Two were fixed. One was reclassified as a hardening improvement. I did not predict which would be which,
-so the writeup is mostly about what actually separated them, and about how I would write a severity
-argument differently now.</p>
+<p>All three were accepted, made public by Keycloak staff, and credited by name. One was fixed and
+backported, one reclassified as an enhancement, one handled publicly as a hardening improvement. The
+writeup is about what separated them, and about how to write a severity argument.</p>
 <p>Keycloak, Aug 2026.</p>
 <hr>
-<h2>Fixes that shipped in other people's code</h2>
+<h2>Reported and fixed in other people's code</h2>
 <ul>
 <li><strong><a href="https://github.com/microsoft/RAMPART/pull/141">microsoft/RAMPART #141</a></strong>, merged Aug 2026. A safety
   probe asserting that the agent does not exfiltrate was passing while the agent exfiltrated on every
@@ -65,8 +66,9 @@ argument differently now.</p>
 <h2>Tools</h2>
 <p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is a harness that refuses to call a
 security test negative unless the rig was shown to work. A run whose positive control never fired is
-recorded as VOID instead of "no bug found". Its headline comparison came out null, and the README leads
-with that rather than burying it.</p>
+recorded as VOID instead of "no bug found". Its prior-art gate is scored against 80 labelled items drawn
+from three public advisory corpora, under a rule written before the corpus was built. 1,275 tests, and 180
+guards each neutered in CI to prove a test catches its removal.</p>
 <div class="foot">
 <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="https://www.linkedin.com/in/mahdi-alhakim-ab75731b9">LinkedIn</a> &middot; <a href="/resume.pdf">Resume</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
 </div>
