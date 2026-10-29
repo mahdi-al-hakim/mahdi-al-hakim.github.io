@@ -1,0 +1,200 @@
+/* Plain, text-first, no framework. The reader came for the writeups.
+   Design constraints taken from sites that hold up for this audience:
+   a narrow measure, real body text, almost no colour, and nothing that
+   moves. No gradients, no cards, no hero, no scroll animation. */
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #5c5c5c;
+  --rule: #d8d4cc;
+  --paper: #fdfcfa;
+  --link: #1f3a68;
+  --code-bg: #f4f2ed;
+  --measure: 34rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e4e1db;
+    --muted: #9a958c;
+    --rule: #3a3833;
+    --paper: #16161a;
+    --link: #93b4e8;
+    --code-bg: #20201f;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 3.5rem 1.25rem 6rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.0625rem/1.65 Charter, "Bitstream Charter", "Sitka Text", Cambria,
+        Georgia, "Times New Roman", serif;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.wrap { max-width: var(--measure); margin: 0 auto; }
+
+/* ---------- headings ---------- */
+
+h1, h2, h3 {
+  line-height: 1.25;
+  font-weight: 600;
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.75rem;
+}
+
+h2 {
+  font-size: 1.1875rem;
+  margin: 2.75rem 0 0.6rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+h3 {
+  font-size: 1.0625rem;
+  margin: 1.9rem 0 0.4rem;
+}
+
+p { margin: 0 0 1.05rem; }
+
+/* ---------- links ---------- */
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+/* ---------- the masthead ---------- */
+
+.masthead { margin-bottom: 2.25rem; }
+
+.lede {
+  font-size: 1.1875rem;
+  line-height: 1.5;
+  margin-bottom: 1.1rem;
+}
+
+.meta {
+  font-size: 0.9375rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.meta a { color: var(--link); }
+
+/* ---------- lists ---------- */
+
+ul, ol { margin: 0 0 1.05rem; padding-left: 1.25rem; }
+li { margin-bottom: 0.45rem; }
+li > ul, li > ol { margin-top: 0.45rem; }
+
+/* ---------- the writeup index ---------- */
+
+.entry { margin-bottom: 2.1rem; }
+.entry h2 { border: 0; margin: 0 0 0.35rem; padding: 0; font-size: 1.125rem; }
+.entry p { margin-bottom: 0.4rem; }
+
+.status {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+/* ---------- code ---------- */
+
+code {
+  font-family: "SF Mono", SFMono-Regular, ui-monospace, "Cascadia Mono",
+               Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  background: var(--code-bg);
+  padding: 0.1em 0.3em;
+  border-radius: 2px;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.8rem 0.9rem;
+  overflow-x: auto;
+  margin: 0 0 1.05rem;
+  line-height: 1.45;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.8125rem;
+}
+
+/* ---------- tables: these writeups lean on them ---------- */
+
+.scroll { overflow-x: auto; margin: 0 0 1.05rem; }
+
+table {
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  min-width: 100%;
+}
+
+th, td {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.4rem 0.7rem 0.4rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+th { font-weight: 600; border-bottom-width: 2px; }
+tbody tr:last-child td { border-bottom: 0; }
+
+/* ---------- quotes ---------- */
+
+blockquote {
+  margin: 0 0 1.05rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--rule);
+  color: var(--muted);
+}
+
+blockquote p:last-child { margin-bottom: 0; }
+
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2.25rem 0; }
+
+/* ---------- footer ---------- */
+
+.foot {
+  margin-top: 3.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+.foot a { color: var(--link); }
+
+/* ---------- small screens ---------- */
+
+@media (max-width: 34rem) {
+  body { padding: 2.25rem 1rem 4rem; font-size: 1rem; }
+  h1 { font-size: 1.375rem; }
+  .lede { font-size: 1.0625rem; }
+  table { font-size: 0.8125rem; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  body { background: #fff; color: #000; padding: 0; font-size: 11pt; }
+  a { color: #000; }
+  pre, table { page-break-inside: avoid; }
+}

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three reports to Keycloak, three different severities, and the two the vendor was right about | Mahdi Alhakim</title>
+<meta name="description" content="Three reports to one vendor inside two weeks">
+<meta name="author" content="Mahdi Alhakim">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<div class="masthead">
+<h1>Three reports to Keycloak, three different severities, and the two the vendor was right about</h1>
+<p class="meta"><a href="/">Mahdi Alhakim</a></p>
+</div>
+
+<p>In early August 2026 I sent Keycloak three private security reports. All three were accepted,
+made public by Keycloak staff, and credited to me by name. None got a CVE. One was reclassified as an
+enhancement, one as a weakness handled publicly as a hardening improvement, and one as a bug, fixed and
+backported. I thought all three were vulnerabilities. The vendor disagreed about two, and on reflection the
+vendor was right about both.</p>
+<p>This is a writeup about that: three reports to one vendor inside two weeks, what separated the one that stayed
+a bug from the two that did not, and what I would change about how I write a severity argument. More of it is
+about the reports than about the bugs.</p>
+<p>What separated them was whose decision the behaviour already was. Impact did not separate them.</p>
+<p><strong>The three, with their public records.</strong></p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>What</th>
+<th>Vendor's class</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/keycloak/keycloak/issues/51376">51376</a></td>
+<td>OAuth2 token revocation ends a session without emitting the CAEP session-revoked event that logout emits</td>
+<td><code>kind/enhancement</code></td>
+<td>Fixed on <code>main</code> by <a href="https://github.com/keycloak/keycloak/pull/51386">PR #51386</a>, merged 2026-10-07. Not backported</td>
+</tr>
+<tr>
+<td><a href="https://github.com/keycloak/keycloak/issues/51718">51718</a></td>
+<td>A client can widen its own JWT authorization-grant audience allowlist through dynamic client registration</td>
+<td><code>kind/weakness</code></td>
+<td>Open. My proposed fix is <a href="https://github.com/keycloak/keycloak/pull/51720">PR #51720</a>, open, review required</td>
+</tr>
+<tr>
+<td><a href="https://github.com/keycloak/keycloak/issues/51630">51630</a></td>
+<td>A delegated admin with <code>Clients:manage</code> can update and disable the internal admin-permissions client</td>
+<td><code>kind/bug</code></td>
+<td>Fixed on <code>main</code> by <a href="https://github.com/keycloak/keycloak/pull/53883">PR #53883</a> 2026-10-14 and backported to <code>release/26.8</code> by <a href="https://github.com/keycloak/keycloak/pull/53958">PR #53958</a> 2026-10-15</td>
+</tr>
+</tbody>
+</table></div>
+<p>All three were originally tracked in Keycloak's private security repository and migrated into the public
+tracker by staff, which is why each public issue is opened by a Keycloak employee and carries an
+acknowledgement line rather than being filed under my own account. The fixes were written by Keycloak
+maintainers in every case except #51720, which is mine and is not merged.</p>
+<h2>The one that stayed a bug</h2>
+<p><code>ClientPermissions.isInternal</code> decides whether a client is off limits to fine-grained admin permissions. It
+denylisted the <code>realm-management</code> client, and in the master realm any client whose id ends in <code>-realm</code>. It
+did not denylist <code>admin-permissions</code>, which is the resource server that holds the realm's entire
+fine-grained permissions model.</p>
+<p>So a delegated administrator holding a <code>Clients:manage</code> permission and no realm-management roles could
+update and disable that client through the Admin API. Set <code>serviceAccountsEnabled</code>, add redirect URIs, turn
+on direct access grants, rename the <code>clientId</code>. Deleting it was correctly refused.</p>
+<p>This one stayed a bug because the product already disagreed with itself. <code>getAccess</code>, the endpoint that
+tells an administrator what they are allowed to do, special-cased this client and returned <code>manage: false</code>.
+<code>canManage</code>, the enforcement path, did not have the same check and fell through to the generic permission
+evaluation, which granted the write. The access report said no and the enforcement said yes.</p>
+<p>I reported it with the smallest fix I could find: add the constant for that client id to <code>isInternal</code>, which
+is how <code>realm-management</code> is already handled. I also wrote in the report that no privilege escalation
+results from it, because enforcement resolves clients by internal id rather than by <code>clientId</code>, and
+disabling the client does not relax the reporting admin's own restrictions.</p>
+<p>Keycloak kept it as <code>kind/bug</code> with <code>priority/important</code> and fixed it in the place I named. The merged change
+is the maintainers' own and goes further than mine: it adds coverage on the enforcement path and on the
+access report, so the two cannot drift apart again. Two community pull requests proposing the same one-line
+change appeared on the public issue and were closed unmerged. The change that landed was written with tests.</p>
+<p>It was backported the day after it hit <code>main</code>. As of 2026-10-27 it is merged to <code>release/26.8</code> and labelled
+<code>release/26.8.2</code>, and 26.8.2 has not been published yet; the newest release is 26.8.1 from 2026-10-13.</p>
+<h2>The one that became an enhancement</h2>
+<p>Keycloak's Shared Signals Framework support emits a CAEP <code>session-revoked</code> Security Event Token when a
+session ends by logout. It emitted nothing when the same session ended by OAuth2 token revocation. The
+<code>/revoke</code> endpoint removes the user session server side, but the event mapper mapped only <code>LOGOUT</code> to that
+token type, and <code>REVOKE_GRANT</code> mapped to nothing.</p>
+<p>The consequence depends entirely on how a relying party validates. A party that introspects every request
+notices immediately. A party that validates access tokens offline, which is the normal and recommended
+pattern, and that subscribes to CAEP specifically so it can learn about revocation in real time, is never
+told. It keeps honouring already-issued access tokens for that session until they expire.</p>
+<p>I filed it as CWE-613, insufficient session expiration. Keycloak accepted the behaviour, labelled it
+<code>priority/important</code>, fixed it on <code>main</code>, and reclassified it as <code>kind/enhancement</code>.</p>
+<p>The reclassification is correct and I can state the reasoning in one sentence, because the public issue
+states it: the exposure window is bounded by the access-token lifetime, and the <code>ssf</code> feature is
+experimental and off by default. A bound that is a configured token lifetime gives you a delay the
+deployment chose for itself. It does not give you an indefinite bypass. And a security property that only
+exists when you turn on a feature marked experimental is a property nobody has been promised yet.</p>
+<p>Which is where my framing was weak. I had described this as relying parties continuing to accept revoked
+tokens, which is true, and I had not said clearly enough that this is also what happens with no CAEP at all.
+CAEP is what shortens the window. The defect is that CAEP shortened the window for one revocation path and
+not the other, so an operator who enabled it got an inconsistent guarantee instead of a broken one. It is a
+real thing to fix. It is also an enhancement to an experimental feature, and calling it a vulnerability in a
+shipped one was my mistake.</p>
+<p>The fix merged to <code>main</code> on 2026-10-07 and was not backported. It is labelled for 27.0.0, which has not been
+released.</p>
+<h2>The one that became a hardening improvement, and the fix I wrote for it</h2>
+<p>The JWT authorization grant accepts an assertion from a federated identity provider and exchanges it for an
+access token. The audience binding is what stops an assertion issued for one relying party from being
+replayed at another. Keycloak reads the acceptable audiences from a client attribute,
+<code>oauth2.jwt.authorization.grant.audience</code>. When that attribute is present it <em>replaces</em> the server-computed
+default, which is the realm issuer and the token endpoint, rather than narrowing it. The same holds for the
+identity provider allowlist attribute.</p>
+<p>Separately, the dynamic client registration write path copies every key from the submitted attribute map
+without inspecting any of them, and no client-registration policy inspects client attributes.</p>
+<p>Put those together and a self-registered client can set its own audience allowlist to the audience of a
+different relying party, set its own identity provider allowlist, obtain an assertion issued for that other
+party, and exchange it for an access token for the federated user.</p>
+<p>I filed it as an authorization problem. Keycloak labelled it <code>kind/weakness</code> and wrote the reason into the
+public issue: the custom audience mapping is an administrator-level configuration that is by design
+available at the client level, so it is handled publicly as a hardening improvement and not as a
+vulnerability.</p>
+<p>I think that is right, and the reason is structural. The attribute is a configuration knob that an
+administrator is supposed to be able to set. There is no rule in the product saying a client may not have a
+custom audience list, so nothing is being bypassed when a client has one. The actual defect is narrower:
+dynamic client registration lets a client write a knob that was only ever meant to be set <em>for</em> it. The
+audience-replacement behaviour is the amplifier. The write path is the bug.</p>
+<p>The distinction decides where the fix goes. If the problem is the audience semantics, you change the grant
+to intersect with the provider default, and you break every deployment that relies on replacement. If the
+problem is who may write the attribute, you gate the write. Keycloak already has the mechanism for exactly
+that, client policies, and the second fix breaks nothing.</p>
+<p>So I wrote it. <a href="https://github.com/keycloak/keycloak/pull/51720">PR #51720</a> adds a client policy executor,
+<code>jwt-authorization-grant-settings-disabled</code>, that rejects requests changing either of the two attributes. It
+follows the existing <code>FullScopeDisabledExecutor</code>, handles both REGISTER and UPDATE so dynamic registration
+and the Admin REST API are both covered, and rejects only an actual change: an update sends the whole client
+representation back, so a request repeating a value the client already has still passes and unrelated edits
+keep working. Enabling the grant on an existing client is rejected, turning it off is allowed. Combined with
+the existing <code>client-updater-context</code> condition, the policy can be scoped to the client's own requests,
+leaving administrators free to configure the client normally. Six files, 664 lines added, one removed, eleven
+integration tests, and documentation in both the securing-apps guide and the client-policies reference next
+to the sibling executors.</p>
+<p>Two limits I wrote into the pull request without waiting to be asked. Client policies only bind the
+paths that fire client policy events, so realm import and partial import are not covered. Both require
+<code>manage-realm</code>, which can disable the policy anyway, so the gap does not reintroduce the original problem,
+but it is a gap. And the executor is opt-in, like every client policy, so it hardens a deployment that
+enables it and does nothing for one that does not.</p>
+<p>It has been open since 2026-08-13 and last saw activity on 2026-10-23. It is not merged, and I have no
+commitment from anyone that it will be.</p>
+<p>I also disclosed in the pull request body that I used AI agents to help analyse the code paths and draft the
+change, and that I reviewed and verified all of it. I would rather say that up front than have a reviewer
+wonder.</p>
+<h2>What actually separated the three</h2>
+<p>The classes the vendor assigned do not track impact. The admin-permissions bug was the one I explicitly
+told the vendor had no privilege escalation in it, and it is the one that got fixed as a bug and backported
+inside four days of hitting <code>main</code>. The audience one has the most alarming attack narrative of the three and
+is the one still labelled a weakness.</p>
+<p>What separated them is whether the product already contained a rule the behaviour violated.</p>
+<ul>
+<li><strong>#51630 violated one.</strong> <code>getAccess</code> said <code>manage: false</code>. The product had stated the intended answer and
+  the enforcement path gave a different one. That is a bug in the ordinary sense and needs no severity
+  argument at all. I did not have to persuade anyone of impact. I had to point at two functions that
+  disagreed.</li>
+<li><strong>#51718 did not.</strong> Nothing in Keycloak said a client may not have a custom audience list. I was asking for
+  a rule that did not exist yet, which is a hardening request no matter how I phrase it. Phrasing it as a
+  bypass just meant the first thing the vendor had to do was correct my vocabulary.</li>
+<li><strong>#51376 was in between.</strong> The rule existed, in the sense that CAEP has a defined meaning, but it existed
+  in an experimental feature that is off by default, so the product had not yet promised it to anybody.</li>
+</ul>
+<p>None of that is specific to Keycloak. A report that says "these two code paths in your product disagree
+about the same question" is almost impossible to argue with and needs no CVSS vector. A report that says
+"this configuration surface should be narrower than you made it" is a design opinion, and dressing it as a
+bypass does not make it stronger. It makes the vendor spend their first reply on the framing instead of on
+the fix.</p>
+<h2>What I would do differently</h2>
+<p><strong>Say which rule is broken, in the product's own words, before saying how bad it is.</strong> On #51630 I did that
+by accident, because the contradiction was so visible that it was the shortest way to describe the bug. On
+the other two I led with impact and let the rule be implied. That is backwards. If I cannot point at a
+statement the product makes and show the code not honouring it, I am proposing a new rule, and I should say
+so plainly and argue for it on its merits.</p>
+<p><strong>State the mitigating facts in the report, not after being asked.</strong> I did do this, and it is the one habit
+here I would keep unchanged. #51630 says in my own words that no privilege escalation results. #51718 says
+that assertions carrying more than one audience are refused and that assertions are single use, which limits
+exploitation without preventing it. #51376 notes the exposure window is bounded. Every one of those is
+evidence against my own severity. Including them is why the vendor's reclassifications read as agreement and
+not as correction. A triager who finds a limiting fact you omitted discounts everything else you wrote.</p>
+<p><strong>Do not argue a reclassification that is correct.</strong> Two of mine were downgraded and I accepted both without
+pushing back. Both downgrades were accurate, and that is the only reason I let them stand. The one thing I
+want from a report is that the defect gets fixed, and all three are fixed or have a fix open. Arguing a
+label would have cost the credibility that makes the next report get read.</p>
+<p><strong>Send a fix when you can tell where it goes.</strong> On #51630 the fix was one constant in one predicate and I
+named it; the maintainers wrote their own, with tests, in the same place. On #51718 the fix was a new
+executor and I wrote it. Writing it was also how I learned the framing was wrong, because building the
+client-policy version made it obvious that the problem was who may write the attribute and not what the
+attribute means. I would not have reached that by arguing about severity.</p>
+<h2>What I do not know</h2>
+<p>Whether any of these were reported by someone else first. The private reports were acknowledged and the
+public issues credit me by name, but Keycloak's private tracker is not visible to me and I have not tried to
+reconstruct it.</p>
+<p>Whether #51720 will be merged. It is open and review is required.</p>
+<p>The exact date I sent each report to <code>keycloak-security@googlegroups.com</code>. I did not keep the sent
+timestamps, and the public record gives only the dates staff opened the issues: 2026-08-03, 2026-08-11 and
+2026-08-13. Those are upper bounds on when each report went in, not the report dates, and every interval in
+this writeup that depends on them should be read that way.</p>
+<h2>Status, as of 2026-10-27</h2>
+<ul>
+<li><strong>#51376.</strong> Closed as completed 2026-10-07. Fixed on <code>main</code> by PR #51386. Labelled <code>release/27.0.0</code>, which
+  is unreleased. Not backported, so every released version still behaves this way. Reclassified
+  <code>kind/enhancement</code>.</li>
+<li><strong>#51630.</strong> Closed as completed 2026-10-14. Fixed on <code>main</code> by PR #53883 and backported to <code>release/26.8</code>
+  by PR #53958 on 2026-10-15. Labelled <code>release/26.8.2</code> and <code>release/27.0.0</code>. 26.8.2 is not published yet;
+  the newest release is 26.8.1.</li>
+<li><strong>#51718.</strong> Open, <code>kind/weakness</code>. My proposed fix, PR #51720, is open with review required. The behaviour
+  is present in released versions.</li>
+<li>No CVE was assigned for any of the three. Each public issue credits me by name.</li>
+<li>Every statement here is checkable with <code>gh</code> against the five issue and pull request numbers above, or
+  against <code>gh release list --repo keycloak/keycloak</code>.</li>
+</ul>
+<div class="foot">
+<a href="/">Back to the index</a> &middot; <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
+</div>
+</div>
+</body>
+</html>

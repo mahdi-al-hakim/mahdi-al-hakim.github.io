@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A one-byte differential in netcdf-c: integer overflow in classic-format length arithmetic | Mahdi Alhakim</title>
+<meta name="description" content="A one-byte differential in netcdf-c">
+<meta name="author" content="Mahdi Alhakim">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<div class="masthead">
+<h1>A one-byte differential in netcdf-c: integer overflow in classic-format length arithmetic</h1>
+<p class="meta"><a href="/">Mahdi Alhakim</a></p>
+</div>
+
+<p>Reported to the vendor on 2026-07-25. Fix <a href="https://github.com/Unidata/netcdf-c/pull/3421">PR #3421</a> opened
+publicly on 2026-07-28 and still open, rebased and green, awaiting maintainer review. My own 90-day
+disclosure date was 2026-10-23 and has passed.</p>
+<p>Two things make publishing this safe while the fix is still open. The mechanism is already public: the
+maintainer asked for the fix as a pull request, so #3421 names both affected functions, both files and the
+wrapping arithmetic itself, and has done since July. Nothing here tells a reader anything the vendor is not
+already hosting. What is not public is how to build a file that triggers it, and that stays withheld until
+the fix lands. Section 9 lists exactly what is held back. There is no CVE. NSF
+Unidata is not a CVE Numbering Authority, so there is no vendor CNA for netCDF-C. The existing records for
+this product were assigned by a third-party CNA.</p>
+<p>I scored this moderate: CVSS 3.1 base 6.1, with no confidentiality impact and only low integrity impact,
+because nothing out of bounds is ever printed and the out-of-bounds write stores process heap data and not
+bytes I choose. One research pass suggested scoring it 7.8 to match five existing netcdf-c records. I
+rejected that. More on severity at the end.</p>
+<h2>Thesis</h2>
+<p>netcdf-c is an OSS-Fuzz project with address and undefined-behaviour sanitizers enabled, and this bug
+survived in it for years because its only fuzz harness opens a file and closes it and never reads an
+attribute value. A one-byte change to an 80-byte classic-format header makes a length multiply wrap, which
+undersizes a heap allocation while the un-wrapped element count is still what drives the loop that fills it.
+The result on a plain <code>-O2</code> build with no sanitizer is an out-of-bounds heap read, then an unbounded
+sequential out-of-bounds heap write, then SIGSEGV.</p>
+<p>The arithmetic is the ordinary part. Unchecked multiplies before <code>malloc</code> are a known class in this file;
+four sibling sites in the same region were given division guards in an earlier audit. What took the work was
+why a well-fuzzed parser still carried it, and that answer is structural.</p>
+<h2>1. Target selection: looking for a coverage gap</h2>
+<p>I did not pick netcdf-c because it looked unaudited. I picked it because it looked audited in a way that had
+a hole with a shape I could name in advance.</p>
+<p>The reasoning, in order:</p>
+<p><strong>netcdf-c is continuously fuzzed.</strong> It is a registered OSS-Fuzz project, with <code>address</code> and <code>undefined</code>
+sanitizers and the usual engines. On its own, that argues against hand-auditing the file parser, because a
+fuzzer with an ASan oracle beats a human at finding memory-safety defects reachable from the entry point it
+drives.</p>
+<p><strong>"Reachable from the entry point it drives" is the whole sentence.</strong> The in-tree harness is one file,
+<code>fuzz/fuzz_open.c</code>, and its body is short enough to quote in full:</p>
+<pre><code class="language-c">int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+    int ncid;
+    if (nc_open_mem(&quot;/tmp/fuzz.nc&quot;, 0, Size, (void *) Data, &amp;ncid) == NC_NOERR) {
+        nc_close(ncid);
+    }
+    return 0;
+}
+</code></pre>
+<p>It opens and it closes. It never calls <code>nc_inq_att</code> and never calls <code>nc_get_att</code>. The build file produces
+exactly one target from it.</p>
+<p><strong>So the blind spot is definable before reading any parser code.</strong> Any defect that requires a second API
+call after a successful open is outside this harness's coverage, no matter how long it runs. The library's
+whole purpose is that you open a file and then read things out of it, so the set of "second calls" is large
+and includes the most commonly used ones.</p>
+<p>That is the structural argument. The tactic generalizes: when a target is fuzzed, read the harness before
+you read the target. The harness tells you which half of the code the fuzzer cannot see.
+A project with one <code>nc_open</code> harness and a hundred public getters has a coverage boundary you can write down
+on one line.</p>
+<p><strong>I did the dedup before the hunt.</strong> Five CVEs were published against netcdf-c in 2025, all credited
+to another researcher, all fixed upstream in one pull request and shipped in v4.10.1. Before writing
+anything I opened each of those five fix sites in the tree I had built and confirmed the fix was present.
+Four of the five are name-length overflows: time units, variable names, dimension names, attribute names,
+all copies into a fixed buffer. The fifth is the same integer-overflow class as what I went looking for, but
+in the variable path, sized from the dimension count. None of the five touched the attribute-value
+allocation. That left a class with a known shape in a function nobody had reported.</p>
+<h2>2. The hypothesis, written before the mechanism was understood</h2>
+<p>The hunt plan named the target before the PoC existed. Its prediction, in substance:</p>
+<blockquote>
+<p>The classic header is fully attacker-controlled with essentially no pre-allocation validation. The
+attribute value buffer is sized from the on-file element count times the element size. That multiply is
+unguarded, so the allocation can come out smaller than the data the file claims. The sibling name-overflow
+CVEs do not cover this because the attribute <em>value</em> allocation is a different site from the attribute
+<em>name</em> copy. Reaching a wrapping count needs the header variant that reads the element count as 8 bytes
+rather than 4, because a 4-byte count cannot wrap a 64-bit <code>size_t</code>.</p>
+</blockquote>
+<p>The oracle was named in advance too: an ASan heap-buffer-overflow on an instrumented build, triggered by a
+hand-crafted header, with a structurally identical honest file as a control.</p>
+<p>Two parts of that hypothesis were wrong, which I come back to in section 7. The target, the class, the
+format requirement and the oracle were right.</p>
+<h2>3. The mechanism</h2>
+<p>Three functions, and an invariant that breaks between them.</p>
+<p><strong>The multiply.</strong> <code>ncx_len_double</code> in <code>libsrc/ncx.h</code> was:</p>
+<pre><code class="language-c">#define ncx_len_double(nelems) \
+    ((nelems) * X_SIZEOF_DOUBLE)
+</code></pre>
+<p><code>X_SIZEOF_DOUBLE</code> is 8. <code>nelems</code> comes from the file. A <code>size_t</code> multiply with no bound on either operand.
+Ten sibling macros in the same block have the same shape.</p>
+<p><strong>The allocation.</strong> <code>new_x_NC_attr</code> in <code>libsrc/attr.m4</code> computes the external byte length from that macro,
+adds it to the rounded size of the struct, and allocates the sum:</p>
+<pre><code class="language-c">    const size_t xsz = ncx_len_NC_attrV(type, nelems);
+    size_t sz = M_RNDUP(sizeof(NC_attr));
+
+    if(sz &gt; SIZE_MAX -xsz)
+        return NULL;
+
+    sz += xsz;
+    attrp = (NC_attr *) malloc(sz);
+    ...
+    attrp-&gt;xsz = xsz;
+    attrp-&gt;nelems = nelems;
+</code></pre>
+<p>There is a guard. It is on the addition. By the time it runs, the multiply has already wrapped, and the
+wrapped value is small, so <code>40 + 8</code> looks unremarkable and passes.</p>
+<p>Then the two fields are stored: <code>xsz</code> wrapped, <code>nelems</code> intact. From that line on, the struct describes two
+different buffers. That broken invariant is the actual defect, more than the multiply is.</p>
+<p><strong>The read.</strong> The value-reading entry point takes the value pointer and hands the conversion helper
+<code>attrp-&gt;nelems</code> as its element count.</p>
+<p><code>attrp-&gt;xsz</code> does not appear anywhere in that helper. The only bound in it is a test for <code>nelems == 0</code>. So
+the conversion loop receives the un-wrapped count as its element count against the wrapped-size buffer, and
+walks off the end on the second iteration.</p>
+<p>A count above 2^61 makes the product exceed 2^64, and the surviving remainder is small enough that the
+allocation looks ordinary while the loop count does not.</p>
+<p>The wrap is reachable only in the classic header variant that reads the count as 8 bytes rather than 4, and
+only for one of the element types; the others round or add a parity term and perturb the arithmetic. The
+variant is selected from the file's own header and not by the application, so a program that never intended
+to accept it gets this path from the file.</p>
+<h2>4. The minimal differential</h2>
+<p>Two 80-byte files, identical except for one byte, and that byte is the high byte of the attribute's 8-byte
+element count. The count is astronomical in one file and 1 in the other.</p>
+<h3>Why minimality is the point</h3>
+<p>The difference is how many alternative explanations survive, and this differential kills the following
+without further work:</p>
+<ul>
+<li><strong>"It is one of the name-length bugs."</strong> The only name in the file is one ASCII byte, far under the name
+  limit. The dimension list and the variable list are empty, so no variable or dimension name is parsed at
+  all, and the variable allocator is never called. No name-copy frame appears in any stack.</li>
+<li><strong>"Your build is broken."</strong> The control file loads and prints <code>1234.5</code> on the same binary in the same run
+  with zero sanitizer output. The instrumentation is working and the parser is working.</li>
+<li><strong>"It needs an unusual configuration."</strong> Both files go through the same default code path. The only input
+  difference is the byte.</li>
+<li><strong>"It is a fuzzer artifact."</strong> There is no mutation. The file is constructed field by field from the format
+  specification by a short stdlib-only Python script, and both files come out of the same generator.</li>
+<li><strong>"Something else in the file is the real cause."</strong> Every other byte is held fixed and verified equal by a
+  byte-comparison. One byte is the entire delta, and the delta is in the one field the hypothesis named.</li>
+</ul>
+<p>A minimal differential gives the experiment exactly one independent variable. Everything else in the two
+files is the matched control. It is the same discipline as running a positive control: it converts "I saw a
+crash" into "this field causes it", and the second claim is the only one a maintainer can act on from the
+report alone.</p>
+<p>The minimality also settles the size of the over-read. No small-over-read variant of this bug exists.
+A wrap needs the product to reach 2^64, and the largest external element size is 8, so any count that
+reaches this state is at least 2^61. The loop count is always astronomical. It is never a few elements past
+the end, so the outcome is always a walk to an unmapped page and never a quiet corruption.</p>
+<h2>5. The evidence</h2>
+<p>All runs against <code>main</code> at commit <code>932548c0</code>, on x86-64, gcc 11.4.0, Ubuntu 22.04 under WSL2, HDF5, DAP and
+NCZARR off.</p>
+<p><strong>Out-of-bounds read, halting ASan.</strong> <code>ncdump -h</code> on the crash file:</p>
+<pre><code>==41==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x504000000300 ...
+READ of size 8 at 0x504000000300 thread T0
+    #0 ... in swapn8b                 build/libsrc/ncx.c:291
+    #1 ... in ncx_getn_double_double  build/libsrc/ncx.c:16224
+    #2 ... in ncx_pad_getn_Idouble    build/libsrc/attr.c:1016
+    #3 ... in NC3_get_att             build/libsrc/attr.c:1600
+    #4 ... in nc_get_att              libdispatch/dattget.c:147
+    #5 ... in pr_att                  ncdump/ncdump.c:811
+    ...
+0x504000000300 is located 0 bytes to the right of 48-byte region [0x5040000002d0,0x504000000300)
+allocated by thread T0 here:
+    #1 ... in new_x_NC_attr           build/libsrc/attr.c:91
+    #2 ... in v1h_get_NC_attr         libsrc/v1hpg.c:767
+    #3 ... in v1h_get_NC_attrarray    libsrc/v1hpg.c:904
+    #4 ... in nc_get_NC               libsrc/v1hpg.c:1560
+    #5 ... in NC3_open                libsrc/nc3internal.c:1198
+    ...
+SUMMARY: AddressSanitizer: heap-buffer-overflow build/libsrc/ncx.c:291 in swapn8b
+</code></pre>
+<p>The 48-byte region is the allocation the arithmetic predicted. <code>attr.c</code> and <code>ncx.c</code> are generated from <code>.m4</code>
+sources at build time, so each of those frames maps back to a line in the <code>.m4</code> file; I gave the maintainer
+both the generated line and its origin, because a line number in a generated file is not something a
+maintainer can open.</p>
+<p><strong>Out-of-bounds write, then SIGSEGV.</strong> The halting sanitizer stops at the first error, so the write needs a
+build compiled with <code>-fsanitize-recover=address</code> and run with <code>halt_on_error=0</code>. Same first error, then:</p>
+<pre><code>WRITE of size 8 at 0x5020000011a0 thread T0
+    #0 ... in swapn8b                 build-recover/libsrc/ncx.c:295
+0x5020000011a0 is located 0 bytes to the right of 16-byte region [0x502000001190,0x5020000011a0)
+allocated by thread T0 here:
+    #1 ... in emalloc                 ncdump/utils.c:45
+    #2 ... in pr_att                  ncdump/ncdump.c:810
+</code></pre>
+<p>followed by:</p>
+<pre><code>AddressSanitizer:DEADLYSIGNAL
+==3885==ERROR: AddressSanitizer: SEGV on unknown address 0x502000010000
+==3885==The signal is caused by a WRITE memory access.
+</code></pre>
+<p>The 16-byte destination is its own instance of the same mistake, one layer up: <code>ncdump</code> allocates
+<code>(att.len + 1) * att.tinfo-&gt;size</code>, which with the same count wraps to 16. So the write is 8 bytes per
+iteration starting immediately past a 16-byte buffer, running forward until it leaves the mapping. Each
+written word is a byte-swapped read from past the 48-byte source allocation, which is process heap data and
+not content I control.</p>
+<p><strong>Plain <code>-O2</code>, no sanitizer.</strong> Here the availability claim is observed directly instead of derived:</p>
+<pre><code>$ ncdump -h control.nc
+netcdf control {
+// global attributes:
+        :a = 1234.5 ;
+}
+EXIT=0
+$ ncdump -h poc.nc
+Segmentation fault (core dumped)
+EXIT=139
+</code></pre>
+<p>Nothing here depends on the debug build. The multiply is on unsigned <code>size_t</code>, so the wrap is well defined
+and not something an optimizer may delete.</p>
+<p><strong>Not an <code>ncdump</code> bug.</strong> A nine-line program that opens the file and reads the attribute value reproduces
+the same read off the same 48-byte region, with no <code>ncdump</code> in the stack. Any
+caller that reads an attribute value without first sanity-checking the length it was handed is in the same
+position.</p>
+<p><strong>And the result that closes the loop with section 1.</strong> A program that opens the file, calls <code>nc_inq_att</code>,
+and closes it without reading the value:</p>
+<pre><code>nc_open(poc.nc) -&gt; 0 (No error)
+  natts=1  att a: len=&lt;astronomical, redacted&gt;
+  nc_close done, NO value read
+EXIT=0
+</code></pre>
+<p>Zero sanitizer output, against the same instrumented library. <code>nc_open</code> returns success on an 80-byte file
+and hands the caller back an element count asserting more than 2^64 bytes of attribute data.</p>
+<p>Two things follow. First, the crash file is a perfectly clean corpus entry under the existing fuzz coverage:
+it exercises the undersized allocation and then exits without ever touching the value. No amount of fuzzing
+that harness finds this, which is the predicted blind spot confirmed from the inside. Second, that
+<code>len</code> value is the defect in one line. The library accepts, stores and re-exports an element count that is
+provably impossible for the file it came from, and every downstream buffer sized from it is already wrong
+before any read happens.</p>
+<h2>6. The fix, and why the two commits have to land together</h2>
+<p><a href="https://github.com/Unidata/netcdf-c/pull/3421">PR #3421</a> is two commits, +47 / -12 across two files.</p>
+<p><strong>Commit 1 saturates the length macros.</strong> Each <code>ncx_len_*</code> now bounds the count before multiplying and
+returns <code>SIZE_MAX</code> on overflow instead of wrapping:</p>
+<pre><code class="language-c">#define ncx_len_double(nelems) \
+    ((size_t)(nelems) &gt; SIZE_MAX / X_SIZEOF_DOUBLE \
+        ? SIZE_MAX \
+        : (size_t)(nelems) * X_SIZEOF_DOUBLE)
+</code></pre>
+<p>The guard differs per macro because the arithmetic does. The plain multiplying forms use
+<code>n &gt; SIZE_MAX / size</code>, which is exact because integer division floors. The paired forms compute at most
+<code>(n + 1) * size</code>, so the guard is <code>n &gt; SIZE_MAX / size - 1</code>. The two rounding forms bound
+<code>n &gt; SIZE_MAX - (X_ALIGN - 1)</code>, which makes the round-up exactly non-overflowing at the boundary.
+<code>_RNDUP</code> itself in <code>include/rnd.h</code> is deliberately untouched, because it is also applied to <code>off_t</code> file
+offsets elsewhere and has to stay type generic; bounding it there produced compiler warnings, which is how I
+found that constraint instead of assuming it.</p>
+<p><strong>Commit 2 bounds the header read by remaining span.</strong> <code>check_v1hs</code> decided whether a read fits like this:</p>
+<pre><code class="language-c">    if((char *)gsp-&gt;pos + nextread &lt;= (char *)gsp-&gt;end)
+</code></pre>
+<p>That addition overflows for a large length, and the comparison then succeeds, so the check fails open
+exactly where the input is largest. Pointer overflow is undefined behaviour besides. It now compares against
+the space that remains, which cannot overflow:</p>
+<pre><code class="language-c">    if((char *)gsp-&gt;pos &lt;= (char *)gsp-&gt;end
+    &amp;&amp; nextread &lt;= (size_t)((char *)gsp-&gt;end - (char *)gsp-&gt;pos))
+</code></pre>
+<p>The added <code>pos &lt;= end</code> test stops a window whose position has passed the end from producing a large unsigned
+difference. I checked the two forms against an independent oracle over 16423 cases at <code>-O0</code> and <code>-O2</code>: the
+old form admits 6 reads it should refuse, including one at <code>pos == end</code> on an exhausted window, the new form
+admits none, and they agree on every other input.</p>
+<p><strong>The correction.</strong> In the pull request as I first described it, I wrote that the second commit could be
+dropped on its own, because the callers' existing checks already reject <code>SIZE_MAX</code>. That is not right, and I
+posted the correction on the PR and updated the description to match. The saturated length goes straight
+into <code>check_v1hs</code>, and the old test there, <code>(char *)gsp-&gt;pos + nextread &lt;= (char *)gsp-&gt;end</code>, wraps and
+passes when <code>nextread</code> is <code>SIZE_MAX</code>. So commit 1 on its own converts a wrapped small length into a
+saturated length that the unfixed bound check still waves through. The two commits need to land together.</p>
+<p>This is the part of the whole exercise I would most want someone to read, because the error was in the
+direction that flatters me. I had offered the maintainer a way to take less of my change, which reads as
+accommodating, and it would have shipped a fix that was weaker than the one I had tested as a pair. The
+reduced version was never the version I checked.</p>
+<p><strong>Regression evidence.</strong> Two clean builds of the same commit, configured identically, <code>-O2 -g -Wall
+-Wextra</code>: 231 distinct compiler warnings before and the identical set after, nothing added; <code>ctest</code> 52 of 52
+with the same per-test result; the crash file now refused through the normal error path with exit 1 and a
+<code>NetCDF: Memory allocation (malloc) failure</code>; the control file's <code>ncdump</code> output byte-identical between the
+two builds; 20 of 20 refusals and 20 of 20 clean control runs for determinism; and <code>ncgen</code>/<code>ncdump</code>
+round-trips in all three classic formats.</p>
+<p>One number to be careful about: 52 of 52 is the classic-format configuration used for the pull request, with
+HDF5, DAP and NCZARR off. A slightly different configuration run earlier gave 53 of 53. Both are true of
+their own configuration, and quoting the wrong one at the wrong time is exactly the kind of small
+inconsistency that makes a reviewer stop trusting the rest.</p>
+<h2>7. What I got wrong</h2>
+<p><strong>The hypothesis put the overflow one function too early.</strong> I predicted the copy loop inside the header
+parser would run past the end of the undersized buffer. It does not. That function sets its remaining count
+from the wrapped size and uses that same wrapped value for both the bound and the copy count, so the header
+copy is internally consistent and stays in bounds. <code>nc_open</code> on its own is safe. The overflow fires one step
+later, the first time any code trusts the un-wrapped element count against the wrapped-size buffer, which is
+on essentially every real read of the attribute value. The target and the class were right and the sink was
+wrong, and that mattered, because the wrong sink would have produced a report telling the maintainer to look
+at a function that is not defective.</p>
+<p><strong>I nearly retracted a true finding.</strong> A re-verification pass concluded the out-of-bounds write was
+unconfirmed and recorded an instruction to stop claiming read-and-write. That was wrong. The write is real
+and reproducible, but only on a build compiled with <code>-fsanitize-recover=address</code> and run with
+<code>halt_on_error=0</code>, because the halting sanitizer aborts on the read that happens one iteration earlier. The
+near-retraction was caused by my own tooling: the gate that was supposed to stop me overclaiming came within
+one step of making me understate a confirmed result, because the proof-of-concept could not express the
+positive under the default configuration. The gate could only ever confirm what its own default build
+happened to show.</p>
+<p><strong>I said the second commit was independently droppable.</strong> Covered in section 6. Publicly corrected on the
+pull request.</p>
+<p><strong>I let two test counts into two different documents.</strong> 53 of 53 in the vendor correspondence and 52 of 52
+in the pull request, from two configurations. Both true, neither wrong, and still a thing I had to go back
+and reconcile instead of getting right once.</p>
+<p><strong>The write's content claim had to be narrowed.</strong> The write is unbounded and sequential, which is alarming,
+and it would be easy to present it as controllable heap corruption. It is not. Each written word is heap
+data read from past the source allocation, so the content is whatever happens to follow it. I declined to
+claim controlled corruption, and that is also why the severity below is what it is.</p>
+<h2>8. Severity, honestly</h2>
+<p>Self-scored CVSS 3.1 base <strong>6.1</strong>, moderate: local attack vector, no privileges, user interaction required,
+no confidentiality impact, low integrity impact, high availability impact.</p>
+<p>The reasoning for the two unusual components:</p>
+<ul>
+<li><strong>No confidentiality impact.</strong> Nothing out of bounds is ever printed. The <code>ncdump</code> function that would
+  print the values runs only after the attribute read returns, and with 2^61 iterations to go it never
+  returns. The read data does not reach the attacker.</li>
+<li><strong>Why integrity impact is low and not high.</strong> The write is unbounded, but it stores process heap data and
+  not attacker-chosen bytes, so I am not claiming controlled corruption.</li>
+</ul>
+<p>A research pass proposed 7.8, matching the five 2025 records for this product. I rejected it. Filing a 7.8
+with anyone after telling the vendor 6.1 is severity inflation against my own analysis, and severity
+credibility is the thing that has actually been working in this disclosure. A service that ingests untrusted
+netCDF files with no user action would score higher, and I am not naming one, because I did not survey
+consumers.</p>
+<p>There is no CVE. NSF Unidata is not a CNA, so there is no vendor to assign one, and the GitHub advisory
+button that assigns one can only be used by a repository administrator. I asked once, on the private
+channel, so that we would not end up with two identifiers for one issue. If no advisory is opened I will
+request an identifier from MITRE with this writeup and the fix commit as the references.</p>
+<h2>9. Limits</h2>
+<p><strong>The fix ships no regression test, and the maintainer said so before I did.</strong> On 2026-10-26 WardF wrote
+on the pull request: "It is green because it didn't break anything, although no new tests were introduced
+to check the correctness of the fix." He is right. The PR touches <code>libsrc/ncx.h</code> and <code>libsrc/v1hpg.c</code> and
+nothing else. Every check I ran is in section 6 and all of it is manual: the two-file differential, the
+oracle sweep, the before-and-after warning count. None of it is in the repository, so none of it runs
+again when someone changes that macro next year.</p>
+<p>That is the exact failure this writeup is about, in my own patch. I found a bug that existed because the
+only harness never read an attribute, wrote the fix, and did not add a test that would catch the
+arithmetic going wrong again. The honest reason is that a regression test for this wants a committed
+input file, and I was withholding the file. That is a real constraint and it is also an excuse: the test
+could have constructed the header in code. I will send one.</p>
+<p>The parts that were not tested:</p>
+<ul>
+<li>Built and ran only <code>main</code> at <code>932548c0</code>, on x86-64. 4.9.2, 4.9.3 and 4.10.1 were read at source level and
+  not executed. 4.9.2 and 4.9.3 do not have the addition guard at all. No release before 4.9.2 was checked.</li>
+<li>No bisect for the introducing commit. The macro and the allocator shape are long-standing, so I expect the
+  reachable form to date from support for the 8-byte-count header variant, but I did not verify that.</li>
+<li>ILP32 is derived from a cast on the format's read path and was not executed. The build refuses that header
+  variant when <code>size_t</code> is 4 bytes, so I could not build it.</li>
+<li>Big-endian was not tested. On a big-endian build the conversion takes a <code>memcpy</code> branch whose length
+  wraps to the same 8 bytes as the allocation, so this file does not over-read there. The undersized
+  allocation itself is endianness-independent.</li>
+<li>I ran the file-path entry point, not the in-memory one the fuzz harness uses. Both reach the same header
+  parse, so I expect the same result, and I said so instead of implying I had run both.</li>
+<li>I tested <code>ncdump</code> and two programs of my own. No other consumer was tested, and I am naming none.</li>
+<li>One allocation site in the I/O layer was not audited.</li>
+<li>The proof-of-concept files, the generator, the field-by-field layout, the exact element count and the
+  format and type selection are not published here, and that list is the whole of what is withheld. The fix
+  is not merged, so the defect is live in every released version, and the structural argument above does not
+  need any of it. These construction details stay unpublished until the fix lands. The maintainer already
+  has all of them.</li>
+</ul>
+<h2>10. Status</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-07-25</td>
+<td>Reported privately to the vendor's security address, with both files, the generator, the ASan output, the affected-version analysis and the distinctness argument against the five 2025 records</td>
+</tr>
+<tr>
+<td>2026-07-28</td>
+<td>Fix PR <a href="https://github.com/Unidata/netcdf-c/pull/3421">#3421</a> opened publicly, with the arithmetic described and the crash path deliberately not named</td>
+</tr>
+<tr>
+<td>2026-08</td>
+<td>CLA signed; the first CI run blocked at the first-time-contributor approval gate rather than on content</td>
+</tr>
+<tr>
+<td>2026-10-23</td>
+<td>My stated 90-day disclosure date</td>
+</tr>
+<tr>
+<td>2026-10-25</td>
+<td>PR open, rebased on <code>main</code>, green, no review yet</td>
+</tr>
+</tbody>
+</table></div>
+<p>The PR is two commits and 47 added lines in two files, and it reuses guard shapes already present elsewhere
+in the same tree. It is waiting on a maintainer.</p>
+<div class="foot">
+<a href="/">Back to the index</a> &middot; <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
+</div>
+</div>
+</body>
+</html>

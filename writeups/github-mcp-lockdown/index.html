@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One method of one tool: an incomplete content filter in github-mcp-server lockdown mode | Mahdi Alhakim</title>
+<meta name="description" content="An incomplete content filter in github-mcp-server lockdown mode">
+<meta name="author" content="Mahdi Alhakim">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<div class="masthead">
+<h1>One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</h1>
+<p class="meta"><a href="/">Mahdi Alhakim</a></p>
+</div>
+
+<p><code>github/github-mcp-server</code> ships an opt-in flag, <code>--lockdown-mode</code>, whose job is to keep text written by
+people with no push access to a public repository out of an agent's context. It is a prompt-injection
+mitigation. <code>pull_request_read</code> is a multi-method tool: one tool name, a <code>method</code> argument, nine cases in a
+switch. Seven of those nine return text written by repository users, and lockdown was applied to them one
+case at a time. Six had a check. <code>get_commits</code> did not, so under lockdown
+a fork pull request from an untrusted account still returned its commit messages in full.</p>
+<p>That is the whole bug. The rest of this is the trust model it sits in, how the gap was found, how it was
+proven at runtime instead of read off the source, and five things I got wrong in the report.</p>
+<p><strong>Status.</strong> Reported privately on 2026-08-09. Fix merged as
+<a href="https://github.com/github/github-mcp-server/pull/3109">PR #3109</a> at 12:41 UTC on 2026-08-19 (merge commit
+<code>769340d6</code>) and published in
+<a href="https://github.com/github/github-mcp-server/releases/tag/v1.10.0">v1.10.0</a> at 17:36 UTC the same day,
+tracked publicly as <a href="https://github.com/github/github-mcp-server/issues/3105">issue #3105</a>. The fix was
+written by a maintainer, not by me; I reported the gap and sent a tested patch. The PR body names three
+reporters and I am one of them. There is no CVE and no published advisory. GitHub did open a draft
+advisory for it, GHSA-w8ww-p3c7-hwxc, titled "Lockdown mode does not restrict pull_request_read
+get_commits, exposing untrusted fork pull request commit messages". It was closed without publication, so
+it carries no severity and no CVE, and it is visible through the repository's security-advisories API
+rather than on the advisory site. I mention it only because it is the vendor's own wording for the
+finding. Everything below is either in that public record or is my own evidence against the shipped
+v1.8.0 binary using two accounts I own.</p>
+<p>This is <strong>not</strong> an authorization bypass, and the distinction does real work. The vendor's position, written
+into the project's own documentation as part of this fix, is that lockdown is a best-effort content filter
+and explicitly not an authorization boundary. I filed it as missing authorization. That was wrong, and the
+section near the end says how.</p>
+<h2>What lockdown is for</h2>
+<p>The rule is per item. For each piece of content the server is about to return from a public repository,
+check whether its author has push access, and if not, withhold it or filter it out. Private repositories are
+unaffected. Collaborators keep full access to their own content.</p>
+<p>The point is narrow and worth stating precisely, because the severity argument turns on it. An agent calling
+these tools already holds a credential. That credential can read every one of these public objects directly
+through the GitHub API. Lockdown does not take that away and was never trying to. What it tries to do is
+stop the server from <em>handing</em> an agent free text written by a stranger, because an agent treats text in its
+context as information and sometimes as instruction. The threat is not disclosure. The threat is that the
+model reads it.</p>
+<p>So the control is a filter on an input channel, and the only property that matters about a filter on an
+input channel is whether it covers every entrance.</p>
+<h2>The gap</h2>
+<p>It covered six of the seven. Here is the enumeration as it stood at v1.8.0, which is the version I confirmed
+against. The function names and the line numbers are from the public source at that tag.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th><code>method</code></th>
+<th>function</th>
+<th>lockdown at v1.8.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get</code></td>
+<td><code>GetPullRequest</code></td>
+<td><code>authorLockdownResult</code> inline, whole result</td>
+</tr>
+<tr>
+<td><code>get_diff</code></td>
+<td><code>GetPullRequestDiff</code></td>
+<td><code>enforcePullRequestLockdown</code>, whole result</td>
+</tr>
+<tr>
+<td><code>get_files</code></td>
+<td><code>GetPullRequestFiles</code></td>
+<td><code>enforcePullRequestLockdown</code>, whole result</td>
+</tr>
+<tr>
+<td><code>get_commits</code></td>
+<td><code>GetPullRequestCommits</code></td>
+<td><strong>none</strong></td>
+</tr>
+<tr>
+<td><code>get_comments</code></td>
+<td><code>GetIssueComments</code></td>
+<td><code>IsSafeContent</code> per item</td>
+</tr>
+<tr>
+<td><code>get_review_comments</code></td>
+<td><code>GetPullRequestReviewComments</code></td>
+<td><code>IsSafeContent</code> per item</td>
+</tr>
+<tr>
+<td><code>get_reviews</code></td>
+<td><code>GetPullRequestReviews</code></td>
+<td><code>IsSafeContent</code> per item</td>
+</tr>
+<tr>
+<td><code>get_status</code></td>
+<td><code>GetPullRequestStatus</code></td>
+<td>none; returns CI status, not pull request text</td>
+</tr>
+<tr>
+<td><code>get_check_runs</code></td>
+<td><code>GetPullRequestCheckRuns</code></td>
+<td>none; returns CI check data, not pull request text</td>
+</tr>
+</tbody>
+</table></div>
+<p>The seven rows above the line are the methods that return text authored by repository users. That is the
+enumeration the filter had to cover. The last two return data produced by the CI system rather than by the
+pull request author, and I did not examine them.</p>
+<p>Three things in that table are worth more than the one missing row.</p>
+<p><strong>The same check is spelled three ways.</strong> <code>get</code> calls <code>authorLockdownResult</code> directly, because it already
+holds the pull request object and does not need to fetch it again. <code>get_diff</code> and <code>get_files</code> call
+<code>enforcePullRequestLockdown</code>, which fetches the pull request and then calls the same helper. The comment and
+review methods call <code>IsSafeContent</code> per entry. One policy, three call shapes. Grepping for any single one of
+them tells you nothing about coverage.</p>
+<p><strong>The check is at the call site, not at the exit.</strong> There is no point through which content must pass on its
+way out of the server. Coverage is therefore a property of whether each author remembered, and a new content
+path is a new place to forget.</p>
+<p><strong>The tool surface is wider than the tool count.</strong> <code>pull_request_read</code> is one entry in the tool list the
+model is shown and one entry in the registry the maintainers maintain. It is a dispatch table with nine
+cases. You cannot see coverage of a dispatch table from a tool list.</p>
+<p>And a commit message is free text. Any GitHub user can put anything in one, on a branch in their own fork,
+with no review and no interaction with the target repository beyond opening the pull request.</p>
+<h2>What it actually buys an attacker</h2>
+<p>Nothing new to read, and nothing new to write. The operator's token could always fetch that commit message.
+No permission changed and no boundary moved.</p>
+<p>What it buys is placement. An operator who turned lockdown on has decided that fork content is untrusted
+input for this agent. With the flag on, <code>get_diff</code> refuses and strangers' comments disappear, so the
+remaining text in the agent's context looks like text the operator sanctioned. The commit message arrives in
+that same context with the same apparent provenance. It is also the least-watched free-text field on a pull
+request: nobody reviews commit messages, and no human workflow renders them prominently.</p>
+<p>The ceiling is whatever the consuming agent will do with instructions it believes came from the repository
+it is working in. That is a property of the agent, not of this server, and I had not surveyed it. Which is
+one reason the score I attached to the report was weaker than I made it sound.</p>
+<h2>How I found it</h2>
+<p>Not by fuzzing. The hypothesis came first, and it was about the shape of the code and not about this
+repository: a filter that must be applied by hand at each call site, sitting behind a dispatch table, will
+be applied at <em>some</em> of the sites. That is an incomplete-enumeration bug. The way to find one is to list the
+enumeration and walk it, not to test the control on the path the documentation uses as its example.</p>
+<p>So the method was mechanical.</p>
+<ol>
+<li>Find the gate. <code>enforcePullRequestLockdown</code> and <code>authorLockdownResult</code> in <code>pkg/github/pullrequests.go</code>,
+   <code>IsSafeContent</code> in <code>pkg/lockdown/lockdown.go</code>.</li>
+<li>List every case in the <code>pull_request_read</code> dispatch that returns text a repository user wrote.</li>
+<li>For each case, follow the call into the function that does the work and check whether any of the three
+   gates appears in it.</li>
+<li>For every case where none does, establish whether the text really is attacker-writable, and prove it at
+   runtime rather than from reading.</li>
+</ol>
+<p>Step 3 produced one hit, and it produced it from the function signature alone. All three gates need the
+dependency object that carries the lockdown cache. <code>GetPullRequestCommits</code> did not take that parameter at
+v1.7.0, v1.8.0 or v1.9.0, so no gate could have been called from inside it. The commit message reaches the
+caller through the minimal commit type's <code>Message</code> field with nothing in between.</p>
+<p>I also checked when the gap opened, because an affected range you cannot defend is worse than no range.
+<code>enforcePullRequestLockdown</code> does not appear in <code>pkg/github/pullrequests.go</code> at v1.6.0 and does appear at
+v1.7.0, four times. <code>GetPullRequestCommits</code> lacks the dependency parameter at v1.7.0, v1.8.0 and v1.9.0. So
+the pull request gate and the gap in it arrived together, and the gap had never been covered.</p>
+<p>Prior art, checked before writing anything up: the repository had exactly two published advisories at the
+time, <code>GHSA-pjp5-fpmr-3349</code> (a lockdown singleton in HTTP mode causing cross-user client confusion) and
+<code>GHSA-w4q6-qw23-4rg7</code> (a nil pointer dereference in the completion handler). Neither concerned
+<code>get_commits</code>.</p>
+<h2>The reproducer, and the control that makes it mean something</h2>
+<p>Reading the source tells you the gate is absent. It does not tell you the content is attacker-controlled in
+practice, and it does not tell you lockdown was even on. Both need a runtime test, and the second needs a
+control.</p>
+<p>The rig used two accounts I own, no third party and no third party's data. A victim account owns a public
+repository and runs the server. An attacker account has no push access to it, forks it, and opens a pull
+request whose commit message carries a unique marker. The attacker also posts a comment with a second
+marker, and the victim posts a comment with a third. Then the same three methods are called twice, once with
+<code>--lockdown-mode</code> and once without.</p>
+<p>The markers turn this into a measurement instead of an impression. <code>COMMIT</code> is the attacker's fork-PR
+commit message, <code>HUMAN</code> is the attacker's no-push comment, <code>OK</code> is the victim's push-access comment.</p>
+<pre><code>MODE: LOCKDOWN ON
+  get_diff:     restricted=true   markers_present=[]        (&quot;access to pull request is restricted by lockdown mode&quot;)
+  get_commits:  restricted=false  markers_present=[COMMIT]  (attacker commit message returned)
+  get_comments: restricted=false  markers_present=[OK]      (attacker no-push comment filtered; victim comment kept)
+
+MODE: lockdown OFF (control)
+  get_diff:     restricted=false  markers_present=[]        (returns the diff)
+  get_commits:  restricted=false  markers_present=[COMMIT]
+  get_comments: restricted=false  markers_present=[HUMAN,OK]
+</code></pre>
+<p>That ran against the shipped v1.8.0 release binary, not a build of my own, driven by a short MCP stdio
+client that speaks JSON-RPC to the server and greps the tool results for the three markers.</p>
+<p>Read the two blocks together, because neither is informative alone.</p>
+<ul>
+<li><code>get_diff</code> refusing with the flag on and returning the diff with it off proves lockdown was active in the
+  first run. Without that line, "<code>get_commits</code> returned the commit" is equally consistent with lockdown
+  being off, with the flag being misspelled, and with the fork not being detected as a fork.</li>
+<li><code>get_comments</code> dropping <code>HUMAN</code> with the flag on and keeping both comments with it off proves the per-item
+  filter was working on this exact pull request against this exact non-push author. So the push-access
+  lookup resolved correctly and the attacker really was classified as untrusted.</li>
+<li>Against those two, <code>get_commits</code> returning <code>COMMIT</code> in both runs is the finding. Same object, same author,
+  same classification, same process. One method returns the text and its siblings do not.</li>
+</ul>
+<p>The positive control is the only reason the negative results are informative. It is the difference between
+"lockdown missed this method" and "I probably ran it wrong".</p>
+<h2>The fix, and verifying it</h2>
+<p>Three lines of substance, deliberately boring.</p>
+<ol>
+<li>Give <code>GetPullRequestCommits</code> the dependency object.</li>
+<li>Call the existing <code>enforcePullRequestLockdown</code> at the top of it and return early if it refuses.</li>
+<li>Pass the dependency object at the one dispatch call site.</li>
+</ol>
+<p>No new code path. It reuses the gate <code>get_diff</code> and <code>get_files</code> already shipped, which is the version of
+this fix with the smallest surface for a new mistake.</p>
+<p>I built and ran that change before sending it, because a suggested fix that has not been run is a suggestion
+and not evidence. Against the then-current source with Go 1.26.5: <code>go build</code> clean, <code>go vet</code> clean,
+pull-request unit tests passing. One unrelated test failed on a tool-schema snapshot, caused by a trailing
+carriage return in base64 icon data, which is a line-ending artifact of my Windows checkout. I proved it
+pre-existing by stashing the patch and getting the identical failure on the unpatched baseline, and said so
+in the report rather than leaving a red test unexplained.</p>
+<p>Then the same two-account rig again, across the four states that matter.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Build</th>
+<th>Lockdown</th>
+<th>PR author</th>
+<th><code>get_commits</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>unpatched</td>
+<td>on</td>
+<td>no push access</td>
+<td><code>restricted=false</code>, <code>[COMMIT]</code></td>
+<td>the bug</td>
+</tr>
+<tr>
+<td>patched</td>
+<td>on</td>
+<td>no push access</td>
+<td><code>restricted=true</code>, <code>[]</code></td>
+<td>fixed, matches <code>get_diff</code></td>
+</tr>
+<tr>
+<td>patched</td>
+<td>off</td>
+<td>no push access</td>
+<td><code>restricted=false</code>, <code>[COMMIT]</code></td>
+<td>no regression with the flag off</td>
+</tr>
+<tr>
+<td>patched</td>
+<td>on</td>
+<td>push access</td>
+<td><code>restricted=false</code>, <code>[COMMIT]</code></td>
+<td>no over-restriction</td>
+</tr>
+</tbody>
+</table></div>
+<p>The last row is the one people skip. A fix that also breaks the legitimate case is not a fix, and
+"restrict everything" would have passed the first three rows.</p>
+<p>Blast radius: <code>GetPullRequestCommits</code> had exactly one caller, the dispatch case that was updated. With
+lockdown off the gate returns before issuing any request, so the off path is unchanged.</p>
+<p>What I did not verify, and said so in the report: the cross-platform matrix, HTTP mode, the GraphQL paths,
+and every toolset combination. The maintainers' CI and review were the final gate, not my local run.</p>
+<h2>What the maintainers added that I had not</h2>
+<p>The merged mechanism is the one I proposed and tested. Two things went further, and both are worth reading
+if you care how vendors reason about this class of control.</p>
+<p>The first is a design argument I had left implicit. Commits are a list with per-item author information, so
+per-item filtering was available, the way comments are filtered. The merged change deliberately keeps the
+whole-result check on the pull request author instead, on the grounds that every commit on a pull request
+belongs to the same untrusted head branch as the diff, so one check on the pull request author is both
+cheaper and strictly more conservative than filtering commit by commit. I agree, and I had not made the
+argument.</p>
+<p>The second is documentation, and it is the part that corrected me. The merged change writes into the README
+and the configuration docs that lockdown mode is a best-effort content filter meant to reduce
+prompt-injection risk, that it is not an authorization boundary, that it does not restrict what the
+underlying credential can read or write, and that content withheld from a filtered tool response may still
+be reachable through other tools or the GitHub API with the same credential.</p>
+<p>The documented list of methods that error under lockdown also grew to name <code>get_diff</code>, <code>get_files</code> and
+<code>get_commits</code>. Two of those were already implemented that way and simply undocumented. That is its own
+small lesson: the gap between the documented surface and the implemented surface is where this kind of bug
+lives in the first place.</p>
+<h2>What I got wrong</h2>
+<p><strong>I filed it as missing authorization.</strong> My report classified it CWE-862 and described it as a bypass of a
+security control. On the vendor's framing, now in the documentation, the correct description is narrower and
+duller: one method of a multi-method tool was not covered by a filter that covered its siblings. The defect
+and the fix are identical either way. The severity story is not. "Authorization bypass" implies a boundary
+was crossed. Nothing was crossed, because the credential could always read that commit message through the
+API. What failed is that an agent was handed untrusted text by a tool configured to withhold untrusted text.
+That is a real problem for the agent and it is not an access-control problem.</p>
+<p>I should have derived that myself from the fact that lockdown applies only to public repositories. A control
+that filters content the caller can fetch anyway by other means is a content filter by construction. I had
+the evidence for the right framing and reached for the wrong vocabulary, which inflates a report without
+adding anything to it.</p>
+<p><strong>I claimed it defeated "the stated purpose" of lockdown.</strong> The purpose was in fact stated loosely enough
+that part of the fix was to state it properly. Writing "defeats the stated purpose" put weight on
+documentation I had not checked was load-bearing.</p>
+<p><strong>I scored it with a user-interaction requirement.</strong> I rated it Medium, assuming the agent only reads the
+pull request when a user asks, which lowers the score. I flagged in the report that dropping the assumption
+raises it and left the choice to the triager. I still think submitting the conservative score was right, but
+my reasoning for it was weak: whether an agent reads a pull request unprompted is a property of the
+consuming agent, which I had not surveyed.</p>
+<p><strong>My affected range was wrong, and I am correcting it here.</strong> The report said <code>&gt;= 1.7.0, &lt;= 1.8.0</code>. That was
+true on 2026-08-09 and false by 2026-08-10, when v1.9.0 shipped with <code>GetPullRequestCommits</code> still lacking
+the dependency parameter. The correct published range is <code>&gt;= 1.7.0, &lt;= 1.9.0</code>, fixed in v1.10.0. I wrote a
+range pinned to the latest release at the time of writing and then never revisited it over the ten days
+before the fix landed. An affected range is a claim with a clock on it.</p>
+<p><strong>I do not know what the other two reporters reported.</strong> Three of us are credited on the fix. The public
+record does not break down who said what and I have not tried to reconstruct it. I was not necessarily
+first. This writeup is my own report and my own evidence only.</p>
+<h2>The transferable lesson</h2>
+<p>If a system filters untrusted text before it reaches a model, then the filter's <strong>coverage</strong>, not its logic,
+is the thing to audit. Three concrete versions of that.</p>
+<p><strong>Enumerate the dispatch table, not the tool list.</strong> Multi-method tools hide their real surface. One tool
+name with seven text-returning methods is seven places the filter has to appear. The registry says one tool.
+Count cases in the switch.</p>
+<p><strong>Grep for the policy, not for a function name.</strong> The same check here had three call shapes, one of which
+existed because the caller already held the object. A coverage audit that greps for one spelling reports
+coverage it has not checked. The reliable signal was the function signature: the gate needs a dependency the
+ungated function did not accept, which is visible without reading a line of the body.</p>
+<p><strong>Check the gate at the exit if you can.</strong> Applied by hand at each call site, coverage is a property of the
+author's memory. A filter that content cannot structurally avoid, applied where results are serialized,
+cannot be missed on a new path. That is a larger refactor than a bug fix and I did not propose it, but it is
+the difference between a control that is complete and one that is complete today.</p>
+<p><strong>Make the trust model explicit before arguing about severity.</strong> Most of the disagreement available in this
+finding is not about the code. It is about whether lockdown was a boundary or a filter, and the code was the
+same under both readings. Getting the vendor to write the answer down was worth more than the three lines of
+fix, because the next report against this surface starts from a stated model.</p>
+<p>And one about reporting and not about agents: <strong>a negative result in a security test needs a positive
+control in the same run.</strong> "The attack did not work" and "the attack did not run" produce the same
+transcript. Here the control was free, because the sibling methods were already gated, so one extra call
+proved the rig was live.</p>
+<h2>Check it yourself</h2>
+<p>Everything in the coverage table and the version archaeology is public source at public tags. These are the
+commands.</p>
+<pre><code class="language-bash"># the merged fix, the credit line, and the design argument
+gh pr view 3109 --repo github/github-mcp-server --json title,state,mergedAt,mergeCommit,body
+gh pr diff 3109 --repo github/github-mcp-server
+
+# the release that shipped it
+gh release view v1.10.0 --repo github/github-mcp-server --json tagName,publishedAt,body
+
+# the gap, at each affected tag: no dependency parameter means no gate could be called
+for t in v1.6.0 v1.7.0 v1.8.0 v1.9.0; do
+  gh api &quot;repos/github/github-mcp-server/contents/pkg/github/pullrequests.go?ref=$t&quot; \
+    --jq .content | base64 -d \
+    | grep -nE 'func GetPullRequestCommits|enforcePullRequestLockdown'
+done
+
+# prior art at the time of the report
+gh api repos/github/github-mcp-server/security-advisories \
+  --jq '.[] | select(.state==&quot;published&quot;) | &quot;\(.ghsa_id) \(.published_at) \(.summary)&quot;'
+</code></pre>
+<p>The runtime transcript is not public, because it is a recording of two accounts I own. The rig is two
+accounts and a short script, so it is reproducible on demand and not something to take on trust.</p>
+<h2>Timeline</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-07-23</td>
+<td>v1.7.0 introduces the pull request lockdown gate, with <code>get_commits</code> outside it</td>
+</tr>
+<tr>
+<td>2026-07-30</td>
+<td>v1.8.0 released, the version the finding was confirmed on</td>
+</tr>
+<tr>
+<td>2026-08-09</td>
+<td>Reported privately through the repository's security advisory form, with the runtime transcript, the reproducer, and a built-and-tested fix</td>
+</tr>
+<tr>
+<td>2026-08-10</td>
+<td>v1.9.0 released, still ungated. My stated affected range became stale here</td>
+</tr>
+<tr>
+<td>2026-08-19</td>
+<td>Public tracking issue #3105 opened at 12:06 UTC, PR #3109 merged at 12:41 UTC, v1.10.0 published at 17:36 UTC</td>
+</tr>
+</tbody>
+</table></div>
+<h2>Scope and status</h2>
+<ul>
+<li>Affected <code>&gt;= 1.7.0, &lt;= 1.9.0</code>. Fixed in v1.10.0, published 2026-08-19.</li>
+<li>Not an authorization bypass. A gap in a best-effort content filter, in the vendor's own terms.</li>
+<li>No CVE was assigned and no security advisory was published. The fix shipped as an ordinary hardening
+  change in a release.</li>
+<li>The fix was authored and merged by a maintainer. PR #3109 credits three reporters, of whom I am one.</li>
+<li>Everything here is in the public issue, PR, diff, release and tagged source, or is my own report's
+  evidence against the shipped v1.8.0 binary using two accounts I own.</li>
+</ul>
+<div class="foot">
+<a href="/">Back to the index</a> &middot; <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
+</div>
+</div>
+</body>
+</html>
