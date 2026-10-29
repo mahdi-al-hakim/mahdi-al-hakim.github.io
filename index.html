@@ -64,8 +64,8 @@ writeup is about what separated them, and about how to write a severity argument
   <code>release/26.8</code>. The access report said the permission was denied while enforcement allowed the write.</li>
 </ul>
 <h2>Tools</h2>
-<p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is a harness that refuses to call a
-security test negative unless the rig was shown to work. A run whose positive control never fired is
+<p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is the public core of a private harness I
+run for vulnerability research. It refuses to call a security test negative unless the rig was shown to work. A run whose positive control never fired is
 recorded as VOID instead of "no bug found". Its prior-art gate is scored against 80 labelled items drawn
 from three public advisory corpora, under a rule written before the corpus was built. 1,275 tests, and 180
 guards each neutered in CI to prove a test catches its removal.</p>
