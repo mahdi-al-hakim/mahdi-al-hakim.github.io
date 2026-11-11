@@ -8,6 +8,7 @@
   --paper: #fdfcfa;
   --link: #1f3a68;
   --code-bg: #f4f2ed;
+  --edge: rgba(0, 0, 0, 0.18);
   --measure: 34rem;
 }
 
@@ -19,6 +20,7 @@
     --paper: #16161a;
     --link: #93b4e8;
     --code-bg: #20201f;
+    --edge: rgba(255, 255, 255, 0.16);
   }
 }
 
@@ -127,14 +129,14 @@ pre code {
   background:
     linear-gradient(to right, var(--paper) 30%, transparent) left / 2rem 100% no-repeat local,
     linear-gradient(to left, var(--paper) 30%, transparent) right / 2rem 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.18), transparent) left / 0.8rem 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.18), transparent) right / 0.8rem 100% no-repeat scroll;
+    radial-gradient(farthest-side at 0 50%, var(--edge), transparent) left / 0.8rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--edge), transparent) right / 0.8rem 100% no-repeat scroll;
 }
 
-/* On wide screens, let tables use more width than the text column. */
-@media (min-width: 62rem) {
-  .scroll {
-    width: min(50rem, calc(100vw - 4rem));
+/* On wider screens, let tables and code blocks use more width than the text column. */
+@media (min-width: 40rem) {
+  .scroll, pre {
+    width: min(50rem, calc(100vw - 2.5rem));
     position: relative;
     left: 50%;
     transform: translateX(-50%);
@@ -198,3 +200,6 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 2.25rem 0; }
   a { color: #000; }
   pre, table { page-break-inside: avoid; }
 }
+
+/* Lining figures: on Windows the serif fallback otherwise uses old-style numerals. */
+body { font-variant-numeric: lining-nums; }

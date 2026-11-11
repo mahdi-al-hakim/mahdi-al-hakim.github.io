@@ -105,12 +105,9 @@ the exposure window is bounded by the access-token lifetime, and the <code>ssf</
 by default. Keycloak relabeled the issue on 2026-10-07 without a comment, so this is my reading of the
 decision. A window bounded by a configured token lifetime is a delay the deployment chose for itself, and
 an experimental feature that is off by default makes no promise yet.</p>
-<p>Which is where my framing was weak. I had described this as relying parties continuing to accept revoked
-tokens, which is true, and I had not said clearly enough that this is also what happens with no CAEP at all.
-CAEP is what shortens the window. The defect is that CAEP shortened the window for one revocation path and
-not the other, so an operator who enabled it got a guarantee that covered logout but not <code>/revoke</code>. It is a
-real thing to fix. It is also an enhancement to an experimental feature, and calling it a vulnerability in a
-shipped one was my mistake.</p>
+<p>My report described relying parties continuing to accept revoked tokens, which also happens with no CAEP at
+all. CAEP shortens that window, and the defect is that it did so for logout but not for <code>/revoke</code>. That
+makes it an enhancement to an experimental feature, which is how Keycloak classified it.</p>
 <p>The fix merged to <code>main</code> on 2026-10-07 and was not backported. It is labeled for 27.0.0, which has not been
 released.</p>
 <h2 id="the-one-that-became-a-hardening-improvement-and-the-fix-i-wrote-for-it">The one that became a hardening improvement, and the fix I wrote for it</h2>
@@ -129,7 +126,7 @@ party, and exchange it for an access token for the federated user.</p>
 public issue: the custom audience mapping is an administrator-level configuration that is by design
 available at the client level, so it is handled publicly as a hardening improvement and not as a
 vulnerability.</p>
-<p>I think that is right, and the reason is structural. The attribute is a configuration knob that an
+<p>The classification fits, and the reason is structural. The attribute is a configuration knob that an
 administrator is supposed to be able to set. There is no rule in the product saying a client may not have a
 custom audience list, so nothing is being bypassed when a client has one. The actual defect is narrower:
 dynamic client registration lets a client write a knob that was only ever meant to be set <em>for</em> it. The
@@ -153,9 +150,8 @@ integration tests, and documentation in both the securing-apps guide and the cli
 to the sibling executors.</p>
 <p>The pull request states one limit: client policies only bind the paths that fire client policy events,
 so realm import and partial import are not covered. Both require <code>manage-realm</code>, which can disable the
-policy anyway, so the gap does not reintroduce the original problem, but it is a gap. An earlier
-description also stated a second limit, later trimmed from it: the executor is opt-in, like every client
-policy, so it hardens a deployment that enables it and does nothing for one that does not.</p>
+policy anyway, so the gap does not reintroduce the original problem, but it is a gap. The
+executor is also opt-in, like every client policy, so it hardens a deployment that enables it and does nothing for one that does not.</p>
 <p>It has been open since 2026-08-13. On 2026-10-23 a maintainer (lhanusov) asked for one more rebase and said
 he would then do a final review and ask for merge; I rebased that day. It is not merged yet.</p>
 <p>I also disclosed in the pull request body that I used AI agents to help analyze the code paths and draft the
@@ -171,8 +167,7 @@ is the one still labeled a weakness.</p>
   the enforcement path gave a different one. That is a bug in the ordinary sense and needs no severity
   argument at all. I only had to show two functions that disagreed.</li>
 <li><strong>#51718 did not.</strong> Nothing in Keycloak said a client may not have a custom audience list. I was asking for
-  a rule that did not exist yet, which is a hardening request no matter how I phrase it. Phrasing it as a
-  bypass just meant the first thing the vendor had to do was correct my vocabulary.</li>
+  a rule that did not exist yet, which is a hardening request no matter how I phrase it.</li>
 <li><strong>#51376 was in between.</strong> The rule existed, in the sense that CAEP has a defined meaning, but it existed
   in an experimental feature that is off by default, so the product had not yet promised it to anybody.</li>
 </ul>
@@ -189,25 +184,15 @@ proposing a new rule, and I should say so plainly and argue for it on its merits
 says in my own words that no privilege escalation results; #51718 notes that assertions carrying more than
 one audience are refused and that assertions are single use, which limits exploitation without preventing
 it; #51376 notes the exposure window is bounded. Every one of those is evidence against my own severity, and
-including them is why the vendor's reclassifications read as agreement, because a
-triager who finds a limiting fact you omitted discounts everything else you wrote.</p>
-<p>Two things followed from that. I did not argue the reclassifications, because both downgrades were accurate
-and the only thing I want from a report is that the defect gets fixed, and all three are fixed or have a fix
-open; arguing a label would have cost the credibility that gets the next report read. And I sent a fix
-wherever I could tell where it went: on #51630 that was one constant in one predicate, which I named and the
-maintainers then wrote with tests in the same place, and on #51718 it was a new executor, which I wrote
-once a maintainer suggested client policies in review. Rebuilding it that way is also how I saw that my
-framing was wrong: the problem is who may write the attribute, and I would not have reached that by arguing
-about severity.</p>
+a triager who finds a limiting fact you omitted discounts everything else you wrote.</p>
+<p>I did not argue either reclassification; both were accurate, and all three issues are fixed or have a fix
+open. I sent a fix wherever I could tell where it went.</p>
 <h2 id="what-i-do-not-know">What I do not know</h2>
 <p>Whether any of these were reported by someone else first. The private reports were acknowledged and the
 public issues credit me by name, but Keycloak's private tracker is not visible to me and I have not tried to
 reconstruct it.</p>
-<p>Whether #51720 will be merged. It is open and review is required.</p>
-<p>The exact date I sent each report to <code>keycloak-security@googlegroups.com</code>. I did not keep the sent
-timestamps, and the public record gives only the dates staff opened the issues: 2026-08-03, 2026-08-11 and
-2026-08-13. Those are upper bounds on when each report went in, not the report dates, and every interval in
-this writeup that depends on them should be read that way.</p>
+<p>The exact date I sent each report. I did not keep the send timestamps; the dates staff opened the issues
+(2026-08-03, 2026-08-11 and 2026-08-13) are upper bounds on when each report went in.</p>
 <h2 id="status-as-of-2026-11-11">Status, as of 2026-11-11</h2>
 <ul>
 <li><strong>#51376.</strong> Closed as completed 2026-10-07. Fixed on <code>main</code> by PR #51386. Labeled <code>release/27.0.0</code>, which
@@ -218,8 +203,6 @@ this writeup that depends on them should be read that way.</p>
 <li><strong>#51718.</strong> Open, <code>kind/weakness</code>. My proposed fix, PR #51720, is open with review required. The behavior
   is present in released versions.</li>
 <li>No CVE was assigned for any of the three. Each public issue credits me by name.</li>
-<li>Every statement here is checkable with <code>gh</code> against the seven issue and pull request numbers above, or
-  against <code>gh release list --repo keycloak/keycloak</code>.</li>
 </ul>
 <div class="foot">
 <a href="/">Back to the index</a> &middot; <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>

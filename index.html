@@ -30,59 +30,49 @@ permission was denied while the write went through. RAMPART's safety probe passe
 data out on every turn.</p>
 <p>Vulnerabilities go to the vendor privately first, and the writeups cover what each check missed and how I
 proved it. Beirut, Lebanon. US citizen, no sponsorship needed. Open to relocating.</p>
-<p><a href="https://github.com/mahdi-al-hakim">GitHub</a> |
-<a href="https://www.linkedin.com/in/mahdi-alhakim-ab75731b9">LinkedIn</a> |
-<a href="resume.pdf">Resume</a> |
-mahdi.a.alhakim@gmail.com</p>
-<hr>
-<h2 id="writeups">Writeups</h2>
-<p>Each went to the vendor privately first, and each covers how the gap was found and how it was
-confirmed.</p>
-<h3 id="one-method-of-one-tool-an-incomplete-content-filter-in-github-mcp-server-lockdown-mode"><a href="writeups/github-mcp-lockdown/">One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</a></h3>
-<p><code>pull_request_read</code> dispatches nine methods from one switch. Seven of them return text written by
-repository users, and lockdown mode covered six. The writeup covers the two-account rig, the positive
-control that proved the gap at runtime, and how GitHub's description of lockdown (a best-effort content
-filter) settled whether this counted as a gap.</p>
-<p>Reported Aug 2026, fixed in v1.10.0 the same month. One of three credited reporters.</p>
-<h3 id="netcdf-c-integer-overflow-in-classic-format-length-arithmetic"><a href="writeups/netcdf-c/">netcdf-c: integer overflow in classic-format length arithmetic</a></h3>
-<p>netcdf-c runs on OSS-Fuzz, and its only fuzz harness opened a file and closed it without ever reading
-an attribute, so an overflow in the classic-format length arithmetic sat out of its reach. Reported Jul
-2026; fix merged Nov 2026. The full writeup will follow the first netcdf-c release that includes the
-fix.</p>
-<h3 id="three-reports-to-keycloak-and-what-separated-them"><a href="writeups/keycloak-caep/">Three reports to Keycloak, and what separated them</a></h3>
-<p>All three were accepted, made public by Keycloak staff, and credited by name. One was fixed and released
-in 26.8.2, one reclassified as an enhancement, one handled publicly as a hardening improvement. The
-writeup is about what separated them, and about how to write a severity argument.</p>
-<p>Keycloak, Aug 2026.</p>
-<hr>
-<h2 id="reported-and-fixed-in-other-peoples-code">Reported and fixed in other people's code</h2>
-<ul>
-<li><strong><a href="https://github.com/microsoft/RAMPART/pull/141">microsoft/RAMPART #141</a></strong>, merged Aug 2026. A safety
-  probe asserting that the agent does not exfiltrate was passing while the agent exfiltrated on every
-  turn, because a tool-only adapter could not observe side effects. Evaluators now return UNDETERMINED
-  when they cannot see the evidence they are judging. Breaking change, +3701/-140 across 40 files.</li>
-<li><strong><a href="https://github.com/microsoft/PyRIT/pull/2320">microsoft/PyRIT #2320</a></strong>, merged Aug 2026, released in
-  v1.1.0. A reset hook so realtime and WebSocket targets close the conversation's connection at the end of
-  each attack.</li>
-<li><strong><a href="https://github.com/github/github-mcp-server/pull/3109">github/github-mcp-server #3109</a></strong>, shipped in
-  v1.10.0. One of three credited reporters.</li>
-<li><strong><a href="https://github.com/keycloak/keycloak/issues/51630">Keycloak #51630</a></strong>, fixed and released in 26.8.2
-  (Nov 2026). The access report said the permission was denied while enforcement allowed the write.</li>
-</ul>
-<h2 id="tools">Tools</h2>
-<p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is the public core of the harness I use for
-vulnerability research. It will not record a security test as negative unless a positive control fired in
-the same run, so a run that proved nothing is filed VOID instead of clean. Its prior-art check queries OSV,
-GHSA and NVD and is scored against 80 labeled items from 40 advisories, and CI removes each of its 180
-guards to show a test catches the removal.</p>
+<p><a href="https://github.com/mahdi-al-hakim">GitHub</a> ·
+<a href="https://www.linkedin.com/in/mahdi-alhakim-ab75731b9">LinkedIn</a> ·
+<a href="resume.pdf">Resume</a> ·
+<a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a></p>
+<h2 id="projects">Projects</h2>
 <p><strong><a href="https://github.com/mahdi-al-hakim/warden">Warden</a></strong> runs a Claude agent on an IT offboarding task under
 policy, human approval, a hash-chained audit log, and a revocation kill switch, and reads the systems back
 at the end of each run. It replays an authored script by default and drives a Claude model in live mode.
 In an eval on Claude Haiku, Sonnet and Opus 5.5, a note planted in the departing contractor's directory
 record asked the agent to also disable a shared admin account, and none of 30 live runs proposed it. Ten
 runs per model still allows a rate of up to about one in four.</p>
-<hr>
-<p>I use Claude, mostly through Claude Code, for parts of the analysis, code and drafting in this work.</p>
+<p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is the public core of the harness I use for
+vulnerability research. It will not record a security test as negative unless a positive control fired in
+the same run, so a run that proved nothing is filed VOID instead of clean. Its prior-art check queries OSV,
+GHSA and NVD and is scored against 80 labeled items from 40 advisories, and CI removes each of its 180
+guards to show a test catches the removal.</p>
+<h2 id="writeups">Writeups</h2>
+<h3 id="one-method-of-one-tool-an-incomplete-content-filter-in-github-mcp-server-lockdown-mode"><a href="writeups/github-mcp-lockdown/">One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</a></h3>
+<p><code>pull_request_read</code> dispatches nine methods from one switch. Seven of them return text written by
+repository users, and lockdown mode covered six. The writeup covers the two-account rig, the positive
+control that proved the gap at runtime, and how GitHub's description of lockdown (a best-effort content
+filter) settled whether this counted as a gap.</p>
+<p class="meta">Reported Aug 2026. Fixed in v1.10.0 the same month; one of three credited reporters.</p>
+<h3 id="three-reports-to-keycloak-and-what-separated-them"><a href="writeups/keycloak-caep/">Three reports to Keycloak, and what separated them</a></h3>
+<p>All three were accepted, made public by Keycloak staff, and credited by name. One was fixed and released
+in 26.8.2, one reclassified as an enhancement, one handled publicly as a hardening improvement. The
+writeup is about what separated them, and about how to write a severity argument.</p>
+<p class="meta">Reported Aug 2026. One fixed and released in 26.8.2, Nov 2026.</p>
+<h3 id="netcdf-c-integer-overflow-in-classic-format-length-arithmetic"><a href="writeups/netcdf-c/">netcdf-c: integer overflow in classic-format length arithmetic</a></h3>
+<p>netcdf-c runs on OSS-Fuzz, and its only fuzz harness opened a file and closed it without ever reading
+an attribute, so an overflow in the classic-format length arithmetic sat out of its reach.</p>
+<p class="meta">Reported Jul 2026. My fix merged Nov 2026. The full writeup follows the first release that includes it.</p>
+<h2 id="fixed-in-other-peoples-code">Fixed in other people's code</h2>
+<ul>
+<li><strong><a href="https://github.com/microsoft/RAMPART/pull/141">microsoft/RAMPART #141</a></strong>, merged Aug 2026. A safety
+  probe asserting that the agent does not exfiltrate was passing while the agent exfiltrated on every
+  turn, because a tool-only adapter could not observe side effects. Evaluators now return UNDETERMINED
+  when they cannot see the evidence they are judging. A breaking change to four public APIs.</li>
+<li><strong><a href="https://github.com/microsoft/PyRIT/pull/2320">microsoft/PyRIT #2320</a></strong>, merged Aug 2026, released in
+  v1.1.0. A reset hook so realtime and WebSocket targets close the conversation's connection at the end of
+  each attack.</li>
+</ul>
+<p class="meta">I use Claude, mostly through Claude Code, for parts of the analysis, code and drafting in this work.</p>
 <div class="foot">
 <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="https://www.linkedin.com/in/mahdi-alhakim-ab75731b9">LinkedIn</a> &middot; <a href="/resume.pdf">Resume</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
 </div>
