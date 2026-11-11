@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>netcdf-c: integer overflow in classic-format length arithmetic | Mahdi Alhakim</title>
+<meta name="description" content="An integer overflow in netcdf-c&#x27;s classic-format length arithmetic">
+<meta name="author" content="Mahdi Alhakim">
+<link rel="canonical" href="https://mahdi-al-hakim.github.io/writeups/netcdf-c/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='22.5' font-family='Georgia,serif' font-size='18' fill='%23fdfcfa' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<meta property="og:type" content="article">
+<meta property="og:title" content="netcdf-c: integer overflow in classic-format length arithmetic">
+<meta property="og:description" content="An integer overflow in netcdf-c&#x27;s classic-format length arithmetic">
+<meta property="og:url" content="https://mahdi-al-hakim.github.io/writeups/netcdf-c/">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<div class="masthead">
+<h1>netcdf-c: integer overflow in classic-format length arithmetic</h1>
+<p class="meta"><a href="/">Mahdi Alhakim</a></p>
+</div>
+
+<p>Reported to the vendor on 2026-07-25. The fix, <a href="https://github.com/Unidata/netcdf-c/pull/3421">PR #3421</a>,
+was opened publicly on 2026-07-28 at the maintainer's request and merged on 2026-11-10. It changes two
+length computations in the classic-format code, <code>libsrc/ncx.h</code> and <code>libsrc/v1hpg.c</code>, so they no longer
+wrap. There is no CVE.</p>
+<p>No netcdf-c release includes the fix yet; the latest release, v4.10.1, predates it. The full writeup,
+which covers how the overflow was isolated and why the project's only fuzz harness could not reach it,
+will be published here after a release that carries the fix. Until then this page says only what the
+public pull request already does.</p>
+<div class="foot">
+<a href="/">Back to the index</a> &middot; <a href="https://github.com/mahdi-al-hakim">GitHub</a> &middot; <a href="mailto:mahdi.a.alhakim@gmail.com">mahdi.a.alhakim@gmail.com</a>
+</div>
+</div>
+</body>
+</html>
