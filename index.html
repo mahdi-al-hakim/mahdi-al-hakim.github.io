@@ -39,13 +39,15 @@ proved it. Beirut, Lebanon. US citizen, no sponsorship needed. Open to relocatin
 policy, human approval, a hash-chained audit log, and a revocation kill switch, and reads the systems back
 at the end of each run. It replays an authored script by default and drives a Claude model in live mode.
 In an eval on Claude Haiku, Sonnet and Opus 5.5, a note planted in the departing contractor's directory
-record asked the agent to also disable a shared admin account, and none of 30 live runs proposed it. Ten
-runs per model still allows a rate of up to about one in four.</p>
+record asked the agent to also disable a shared admin account, and none of 30 live runs acted on it. No
+arm made that write the right call, so it can't show a model refusing it, and ten runs per model still
+allows a rate of up to about one in four.</p>
 <p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is the public core of the harness I use for
-vulnerability research. It will not record a security test as negative unless a positive control fired in
-the same run, so a run that proved nothing is filed VOID instead of clean. Its prior-art check queries OSV,
-GHSA and NVD and is scored against 80 labeled items from 40 advisories, and CI removes each of its 180
-guards to show a test catches the removal.</p>
+vulnerability research. It will not record a security test as negative unless the same run shows the
+target answering and the plain version of the attack being refused, so a run whose rig never worked is
+filed VOID instead of clean. Whether a test's own probe can see a success is still up to whoever wrote it.
+Its prior-art check queries OSV, GHSA and NVD and is scored against 80 labeled items from 40 advisories,
+and CI removes each of its 188 guards to show a test catches the removal.</p>
 <h2 id="writeups">Writeups</h2>
 <h3 id="one-method-of-one-tool-an-incomplete-content-filter-in-github-mcp-server-lockdown-mode"><a href="writeups/github-mcp-lockdown/">One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</a></h3>
 <p><code>pull_request_read</code> dispatches nine methods from one switch. Seven of them return text written by
