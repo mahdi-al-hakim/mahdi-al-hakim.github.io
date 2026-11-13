@@ -48,6 +48,14 @@ target answering and the plain version of the attack being refused, so a run who
 filed VOID instead of clean. Whether a test's own probe can see a success is still up to whoever wrote it.
 Its prior-art check queries OSV, GHSA and NVD and is scored against 80 labeled items from 40 advisories,
 and CI removes each of its 188 guards to show a test catches the removal.</p>
+<p><strong><a href="https://github.com/mahdi-al-hakim/malt-reward-hacking">malt-reward-hacking</a></strong> checks monitor scores
+on METR's MALT dataset against the simplest baseline I could find. In three of MALT's prompted labels
+the agent names the behavior it was told to show: a check for the word in the label's own name finds
+223 of the 224 sabotage runs and none of the 6,047 normal runs, and does nearly as well for refusals
+and for matching a weaker model. So a monitor's score on those labels can't show it finds sabotage an
+agent keeps quiet about. On 62 organic reward-hacking runs, five model-free code checks flagged 21 hacks
+against 13 of 52 controls, and a Claude Haiku 5.5 monitor flagged 51 at the same 13; the study measures
+the confounds behind that gap and says why it isn't a blind test.</p>
 <h2 id="writeups">Writeups</h2>
 <h3 id="one-method-of-one-tool-an-incomplete-content-filter-in-github-mcp-server-lockdown-mode"><a href="writeups/github-mcp-lockdown/">One method of one tool: an incomplete content filter in github-mcp-server lockdown mode</a></h3>
 <p><code>pull_request_read</code> dispatches nine methods from one switch. Seven of them return text written by
