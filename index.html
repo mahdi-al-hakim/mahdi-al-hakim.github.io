@@ -38,10 +38,11 @@ proved it. Beirut, Lebanon. US citizen, no sponsorship needed. Open to relocatin
 <p><strong><a href="https://github.com/mahdi-al-hakim/warden">Warden</a></strong> runs a Claude agent on an IT offboarding task under
 policy, human approval, a hash-chained audit log, and a revocation kill switch, and reads the systems back
 at the end of each run. It replays an authored script by default and drives a Claude model in live mode.
-In an eval on Claude Haiku, Sonnet and Opus 5.5, a note planted in the departing contractor's directory
-record asked the agent to also disable a shared admin account, and none of 30 live runs acted on it. No
-arm made that write the right call, so it can't show a model refusing it, and ten runs per model still
-allows a rate of up to about one in four.</p>
+In two pre-registered rounds of an eval on Claude Haiku, Sonnet and Opus 5.5, a note planted in the
+departing contractor's directory record asked the agent to also disable a shared admin account. In 150
+note runs no agent proposed it, though Haiku twice acted on the note through a harmless call the count
+misses. When the task itself asked for the disable, Haiku proposed it in 9 of 10 runs, so its zeros mean
+it declined; Opus held the step for confirmation in 8 of 10. Warden blocked all 18 attempts on live runs.</p>
 <p><strong><a href="https://github.com/mahdi-al-hakim/controlarm">controlarm</a></strong> is the public core of the harness I use for
 vulnerability research. It will not record a security test as negative unless the same run shows the
 target answering and the plain version of the attack being refused, so a run whose rig never worked is
@@ -52,8 +53,8 @@ and CI removes each of its 188 guards to show a test catches the removal.</p>
 on METR's MALT dataset against the simplest baseline I could find. In three of MALT's prompted labels
 the agent names the behavior it was told to show: a check for the word in the label's own name finds
 223 of the 224 sabotage runs and none of the 6,047 normal runs, and does nearly as well for refusals
-and for matching a weaker model. So a monitor's score on those labels can't show it finds sabotage an
-agent keeps quiet about. On 62 organic reward-hacking runs, five model-free code checks flagged 21 hacks
+and for matching a weaker model. In a follow-up designed and pushed before it ran, removing those
+statements of intent from 120 runs dropped the same monitor's AUROC from 0.891 to 0.705. On 62 organic reward-hacking runs, five model-free code checks flagged 21 hacks
 against 13 of 52 controls, and a Claude Haiku 5.5 monitor flagged 51 at the same 13; the study measures
 the confounds behind that gap and says why it isn't a blind test.</p>
 <h2 id="writeups">Writeups</h2>
